@@ -9,7 +9,7 @@ function localApi() {
     configureServer(server) {
       server.middlewares.use('/api', async (req, res, next) => {
         const name = req.url.split('?')[0].replace(/^\//, '');
-        if (!['generate-recipe', 'scan-receipt', 'plan-week'].includes(name)) return next();
+        if (!['generate-recipe', 'scan-receipt', 'plan-week', 'recipe-photo'].includes(name)) return next();
         try {
           const { default: handler } = await server.ssrLoadModule(`/netlify/functions/${name}.mjs`);
           const chunks = [];
@@ -34,6 +34,6 @@ function localApi() {
 
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), '');
-  for (const k of ['GEMINI_API_KEY', 'GEMINI_MODEL']) if (env[k] && !process.env[k]) process.env[k] = env[k];
+  for (const k of ['GEMINI_API_KEY', 'GEMINI_MODEL', 'UNSPLASH_ACCESS_KEY']) if (env[k] && !process.env[k]) process.env[k] = env[k];
   return { plugins: [react(), localApi()] };
 });

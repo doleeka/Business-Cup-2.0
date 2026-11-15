@@ -86,3 +86,11 @@ Files are limited to 4 MB because Netlify Functions accept at most 6 MB per requ
 4. Optional: `GEMINI_MODEL` to pick a model. By default the app uses `gemini-flash-lite-latest` (fast, current Flash-Lite) and falls back to `gemini-flash-latest` if it is busy, retired or times out.
 
 The key stays on the server (`netlify/functions/`, shared code in `netlify/lib/gemini.mjs`), never in the browser. The free tier has per-minute/per-day limits; when reached, the app shows "Free AI limit reached". Nutrition and cost are AI estimates.
+
+## Photos for new recipes (free Unsplash API)
+Recipes created by AI or added by hand get a real food photo from Unsplash (the built-in recipes' photos come from Unsplash too), with the photographer credited in the recipe window. Recipes without a photo show a **Find a photo** button.
+
+1. Create a free account at https://unsplash.com/developers → **Your apps → New Application** → copy the **Access Key**.
+2. Netlify → Site configuration → Environment variables → add `UNSPLASH_ACCESS_KEY`, then redeploy.
+
+Demo apps get 50 photo searches per hour. Without the key, recipes keep their emoji cards. (Gemini image generation is not available on the free Gemini tier, so it is not used.)
