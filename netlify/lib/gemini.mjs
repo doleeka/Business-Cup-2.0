@@ -84,38 +84,71 @@ export function filePart(file, kinds) {
   return { part: { inlineData: { mimeType, data } }, kind: mimeType.startsWith('video/') ? 'video' : 'image' };
 }
 
+// Models tried in order. "gemini-flash-latest" is Google's alias for the current Flash model, so the app
+// keeps working when an older model is retired (a retired model answers 404 Not Found).
+function modelList() {
+  const list = [process.env.GEMINI_MODEL, 'gemini-flash-latest', 'gemini-2.5-flash', 'gemini-flash-lite-latest'];
+  return [...new Set(list.map((m) => String(m || '').trim().replace(/^models\//, '')).filter(Boolean))];
+}
+
+async function callModel(model, key, parts, schema, thinkingOff) {
+  return fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
+    body: JSON.stringify({
+      contents: [{ role: 'user', parts }],
+      generationConfig: {
+        responseMimeType: 'application/json',
+        responseSchema: schema,
+        temperature: 0.4,
+        // Big answers (a whole week) skip "thinking" to stay well within Netlify's time limit.
+        ...(thinkingOff ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+      },
+    }),
+  });
+}
+
 // Calls Gemini with structured JSON output. Returns { data } or { response } (an error Response to return as is).
 export async function askGemini(parts, schema, { youtube = false, fast = false } = {}) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return { response: json({ error: 'GEMINI_API_KEY is not configured on the server' }, 500) };
-  const model = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
 
   let res;
-  try {
-    res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts }],
-        generationConfig: {
-          responseMimeType: 'application/json',
-          responseSchema: schema,
-          temperature: 0.4,
-          // Big answers (a whole week) skip "thinking" on Flash models to stay well within Netlify's time limit.
-          ...(fast && /flash/.test(model) ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
-        },
-      }),
-    });
-  } catch {
-    return { response: json({ error: 'Could not reach the AI service' }, 502) };
+  let detail = '';
+  for (const model of modelList()) {
+    let thinkingOff = fast && /flash/.test(model);
+    try {
+      res = await callModel(model, key, parts, schema, thinkingOff);
+      // Some models don't allow switching thinking off — retry the same model with default settings.
+      if (res.status === 400 && thinkingOff) {
+        detail = await res.text().catch(() => '');
+        if (/thinking/i.test(detail)) {
+          thinkingOff = false;
+          res = await callModel(model, key, parts, schema, false);
+        } else {
+          res = new Response(detail, { status: 400 });
+        }
+      }
+    } catch {
+      return { response: json({ error: 'Could not reach the AI service' }, 502) };
+    }
+    if (res.status !== 404) break; // 404 = model retired or unknown → try the next one
+    detail = await res.text().catch(() => '');
+    console.error(`Gemini model ${model} not found, trying next`, detail.slice(0, 300));
   }
 
   if (res.status === 429) return { response: json({ error: 'Free AI limit reached — try again in a minute' }, 429) };
   if (!res.ok) {
-    const detail = await res.text().catch(() => '');
+    detail = await res.text().catch(() => detail);
     console.error('Gemini error', res.status, detail);
     if (youtube && res.status === 400)
       return { response: json({ error: 'Could not open this YouTube video — it must be public' }, 400) };
+    if (res.status === 400 && /API key/i.test(detail))
+      return { response: json({ error: 'The Gemini API key is invalid — check GEMINI_API_KEY in Netlify' }, 502) };
+    if (res.status === 403)
+      return { response: json({ error: 'The Gemini API key has no access — create a new key in Google AI Studio' }, 502) };
+    if (res.status === 404)
+      return { response: json({ error: 'No available Gemini model found — set GEMINI_MODEL in Netlify (e.g. gemini-flash-latest)' }, 502) };
     return { response: json({ error: `AI service error (${res.status})` }, 502) };
   }
 

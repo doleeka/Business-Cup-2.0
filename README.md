@@ -83,6 +83,6 @@ Files are limited to 4 MB because Netlify Functions accept at most 6 MB per requ
 1. Get a free key at https://aistudio.google.com/apikey
 2. **Locally:** create a `.env` file in the project root (it is git-ignored) with `GEMINI_API_KEY=your-key`, then `npm run dev`.
 3. **Netlify:** Site configuration → Environment variables → add `GEMINI_API_KEY`, then redeploy.
-4. Optional: `GEMINI_MODEL` to switch model (default `gemini-2.5-flash`).
+4. Optional: `GEMINI_MODEL` to pick a model. By default the app uses `gemini-flash-latest` (always the current Flash model) and automatically falls back to other models if one is retired.
 
 The key stays on the server (`netlify/functions/`, shared code in `netlify/lib/gemini.mjs`), never in the browser. The free tier has per-minute/per-day limits; when reached, the app shows "Free AI limit reached". Nutrition and cost are AI estimates.
