@@ -3,40 +3,13 @@
 //  - a screenshot / photo                { image: { mimeType, data } }
 //  - a YouTube link                      { youtube: "https://..." }
 //  - a short uploaded video (TikTok/Reel) { video: { mimeType, data } }
-import { MEALS, json, num, youtubeUrl, filePart, askGemini } from '../lib/gemini.mjs';
+import { MEALS, json, youtubeUrl, filePart, askGemini, recipeProps, recipeRequired, cleanRecipe, UNITS_RULES as COMMON } from '../lib/gemini.mjs';
 
 const schema = {
   type: 'OBJECT',
-  properties: {
-    found: { type: 'BOOLEAN', description: 'false if the media shows no food, dish or recipe' },
-    name: { type: 'STRING' },
-    category: { type: 'STRING', enum: MEALS },
-    emoji: { type: 'STRING', description: 'One food emoji' },
-    cal: { type: 'NUMBER', description: 'kcal per serving' },
-    protein: { type: 'NUMBER', description: 'grams per serving' },
-    carbs: { type: 'NUMBER', description: 'grams per serving' },
-    fat: { type: 'NUMBER', description: 'grams per serving' },
-    cost: { type: 'NUMBER', description: 'estimated USD per serving' },
-    minutes: { type: 'NUMBER', description: 'total cooking time' },
-    ingredients: {
-      type: 'ARRAY',
-      items: {
-        type: 'OBJECT',
-        properties: { name: { type: 'STRING' }, grams: { type: 'NUMBER', description: 'grams per serving' } },
-        required: ['name', 'grams'],
-      },
-    },
-    steps: { type: 'STRING', description: 'Short cooking instructions, 2-6 sentences' },
-  },
-  required: ['found', 'name', 'category', 'emoji', 'cal', 'protein', 'carbs', 'fat', 'cost', 'minutes', 'ingredients', 'steps'],
+  properties: { found: { type: 'BOOLEAN', description: 'false if the media shows no food, dish or recipe' }, ...recipeProps },
+  required: ['found', ...recipeRequired],
 };
-
-const COMMON = [
-  'All quantities, calories and macros are for ONE serving. If the source states several servings, divide accordingly.',
-  'Ingredient amounts in grams (liquids: 1 ml = 1 g); convert cups, spoons and pieces to grams.',
-  'Use common supermarket ingredient names. Cost is an estimated average US grocery price per serving.',
-  'Write the recipe in English, even if the source is in another language.',
-];
 
 export default async (req) => {
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
@@ -84,25 +57,9 @@ export default async (req) => {
   if (r.found === false) {
     return json({ error: source === 'dish' ? 'AI could not build this recipe, try another name' : 'No recipe or dish found here — try another file or link' }, 422);
   }
-  const ingredients = (Array.isArray(r.ingredients) ? r.ingredients : [])
-    .map((i) => [String(i?.name || '').trim(), num(i?.grams, 5000)])
-    .filter(([n]) => n)
-    .slice(0, 30);
-  if (!r.name || !ingredients.length) return json({ error: 'AI could not build this recipe, please retry' }, 502);
-
-  return json({
-    name: String(r.name).slice(0, 120),
-    category: MEALS.includes(r.category) ? r.category : category || 'Dinner',
-    emoji: String(r.emoji || '🍽️').slice(0, 8),
-    cal: Math.round(num(r.cal, 5000)),
-    protein: Math.round(num(r.protein, 500)),
-    carbs: Math.round(num(r.carbs, 1000)),
-    fat: Math.round(num(r.fat, 500)),
-    cost: num(r.cost, 100),
-    minutes: Math.round(num(r.minutes, 1440)),
-    ingredients,
-    steps: String(r.steps || '').slice(0, 3000),
-  });
+  const recipe = cleanRecipe(r, category || 'Dinner');
+  if (!recipe) return json({ error: 'AI could not build this recipe, please retry' }, 502);
+  return json(recipe);
 };
 
 export const config = { path: '/api/generate-recipe' };

@@ -9,7 +9,7 @@ function localApi() {
     configureServer(server) {
       server.middlewares.use('/api', async (req, res, next) => {
         const name = req.url.split('?')[0].replace(/^\//, '');
-        if (!['generate-recipe', 'scan-receipt'].includes(name)) return next();
+        if (!['generate-recipe', 'scan-receipt', 'plan-week'].includes(name)) return next();
         try {
           const { default: handler } = await server.ssrLoadModule(`/netlify/functions/${name}.mjs`);
           const chunks = [];

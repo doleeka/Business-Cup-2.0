@@ -48,7 +48,7 @@ git config --global user.email "your-github-email@example.com"
 - Grocery list — ingredient aggregation, pantry quantities, approximate cost, manually entered receipt totals and download
 
 ## Honest MVP limitations
-- No user accounts or live store pricing. AI features (Gemini free tier via Netlify Functions): recipe by dish name, screenshot/photo to recipe, video to recipe (YouTube link or a short uploaded video) and receipt scanning.
+- No user accounts or live store pricing. AI features (Gemini free tier via Netlify Functions): budget week planning, recipe by dish name, screenshot/photo to recipe, video to recipe (YouTube link or a short uploaded video) and receipt scanning.
 - Menu data and food prices are illustrative, not verified nutritional/medical advice or live prices.
 - Allergy warnings rely on simple text matching and cannot ensure food safety.
 - Local browser storage is used, so data is per browser/device and is lost when its site data is cleared.
@@ -67,6 +67,11 @@ Search for `Nourishly` and `nourishly` in VS Code (Ctrl+Shift+F). Change visible
 
 ## AI recipe generator (free Gemini API)
 Recipes → **AI recipe ideas** / **AI recipe**: type a dish name, the AI drafts the recipe, you review it in the form and save.
+
+## Budget planning
+On **Weekly menu** the budget banner has two buttons:
+- **Fit to budget** (instant, no AI): re-picks meals from the recipe library so the week fits the budget, skipping allergies/dislikes, preferring liked foods and keeping variety (`src/planner.js`). **Undo** restores the previous plan.
+- **AI budget week**: AI creates 14 new budget recipes for the family (budget per serving = weekly budget ÷ people ÷ 35 meals, plus allergies, dislikes, likes, health notes and optional wishes), adds them to Recipes and fills all 35 meals within the budget (`netlify/functions/plan-week.mjs`).
 
 Also powered by the same key:
 - **Recipes → Screenshot**: upload a screenshot of a recipe (post, website, cookbook page) or a photo of a dish.
