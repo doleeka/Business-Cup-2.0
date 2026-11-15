@@ -91,76 +91,87 @@ function modelList() {
   return [...new Set(list.map((m) => String(m || '').trim().replace(/^models\//, '')).filter(Boolean))];
 }
 
-async function callModel(model, key, parts, schema, thinkingOff) {
+// mode.thinkingOff: skip "thinking" so big answers (a whole week) stay within Netlify's time limit.
+// mode.plain: no responseSchema (some models reject parts of it) — the schema is described in the prompt instead.
+async function callModel(model, key, parts, schema, mode) {
+  const contents = mode.plain
+    ? [{ role: 'user', parts: [...parts, { text: `Answer ONLY with a JSON object that follows this JSON schema (no markdown, no comments):\n${JSON.stringify(schema)}` }] }]
+    : [{ role: 'user', parts }];
   return fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
     body: JSON.stringify({
-      contents: [{ role: 'user', parts }],
+      contents,
       generationConfig: {
         responseMimeType: 'application/json',
-        responseSchema: schema,
-        temperature: 0.4,
-        // Big answers (a whole week) skip "thinking" to stay well within Netlify's time limit.
-        ...(thinkingOff ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+        ...(mode.plain ? {} : { responseSchema: schema, temperature: 0.4 }),
+        ...(mode.thinkingOff ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
       },
     }),
   });
 }
+
+// Google's own error text, e.g. {"error":{"message":"..."}} → "...".
+const googleMessage = (detail) => {
+  try { return String(JSON.parse(detail)?.error?.message || '').slice(0, 220); } catch { return String(detail || '').slice(0, 220); }
+};
 
 // Calls Gemini with structured JSON output. Returns { data } or { response } (an error Response to return as is).
 export async function askGemini(parts, schema, { youtube = false, fast = false } = {}) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return { response: json({ error: 'GEMINI_API_KEY is not configured on the server' }, 500) };
 
-  let res;
+  let status = 0;
   let detail = '';
-  for (const model of modelList()) {
-    let thinkingOff = fast && /flash/.test(model);
-    try {
-      res = await callModel(model, key, parts, schema, thinkingOff);
-      // Some models don't allow switching thinking off — retry the same model with default settings.
-      if (res.status === 400 && thinkingOff) {
-        detail = await res.text().catch(() => '');
-        if (/thinking/i.test(detail)) {
-          thinkingOff = false;
-          res = await callModel(model, key, parts, schema, false);
-        } else {
-          res = new Response(detail, { status: 400 });
-        }
+  let out = null;
+  models: for (const model of modelList()) {
+    // Request variants for this model, from the preferred one to the most compatible one.
+    const modes = [
+      ...(fast && /flash/.test(model) ? [{ thinkingOff: true }] : []),
+      {},
+      { plain: true },
+    ];
+    for (const mode of modes) {
+      let res;
+      try {
+        res = await callModel(model, key, parts, schema, mode);
+      } catch {
+        return { response: json({ error: 'Could not reach the AI service' }, 502) };
       }
-    } catch {
-      return { response: json({ error: 'Could not reach the AI service' }, 502) };
+      status = res.status;
+      if (res.ok) { out = await res.json(); break models; }
+      detail = await res.text().catch(() => '');
+      console.error(`Gemini ${model} ${JSON.stringify(mode)} → ${status}`, detail.slice(0, 500));
+      if (status === 429 || status === 403 || (status === 400 && /API key/i.test(detail))) break models;
+      if (status === 400 && youtube && /youtube|video|file|uri|url/i.test(detail)) break models;
+      if (status !== 400) break; // 404 retired model, 500/503 overloaded → next model; 400 → next variant
     }
-    // 404 = model retired or unknown; 500/503 = Google is overloaded right now → try the next model.
-    if (![404, 500, 503].includes(res.status)) break;
-    detail = await res.text().catch(() => '');
-    console.error(`Gemini model ${model} answered ${res.status}, trying next`, detail.slice(0, 300));
-    if (res.status !== 404) await new Promise((r) => setTimeout(r, 800));
+    if (status === 500 || status === 503) await new Promise((r) => setTimeout(r, 800));
   }
 
-  if (res.status === 429) return { response: json({ error: 'Free AI limit reached — try again in a minute' }, 429) };
-  if (!res.ok) {
-    detail = await res.text().catch(() => detail);
-    console.error('Gemini error', res.status, detail);
-    if (youtube && res.status === 400)
+  if (!out) {
+    const msg = googleMessage(detail);
+    if (status === 429) return { response: json({ error: 'Free AI limit reached — try again in a minute' }, 429) };
+    if (youtube && status === 400)
       return { response: json({ error: 'Could not open this YouTube video — it must be public' }, 400) };
-    if (res.status === 400 && /API key/i.test(detail))
+    if (status === 400 && /API key/i.test(detail))
       return { response: json({ error: 'The Gemini API key is invalid — check GEMINI_API_KEY in Netlify' }, 502) };
-    if (res.status === 403)
+    if (status === 403)
       return { response: json({ error: 'The Gemini API key has no access — create a new key in Google AI Studio' }, 502) };
-    if (res.status === 404)
+    if (status === 404)
       return { response: json({ error: 'No available Gemini model found — set GEMINI_MODEL in Netlify (e.g. gemini-flash-latest)' }, 502) };
-    if (res.status === 500 || res.status === 503)
+    if (status === 500 || status === 503)
       return { response: json({ error: 'Google AI is overloaded right now — please try again in a minute' }, 503) };
-    return { response: json({ error: `AI service error (${res.status})` }, 502) };
+    return { response: json({ error: `AI service error (${status})${msg ? ': ' + msg : ''}` }, 502) };
   }
 
-  const out = await res.json();
-  const text = out?.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('') || '';
+  const text = (out?.candidates?.[0]?.content?.parts || []).filter((p) => !p.thought).map((p) => p.text || '').join('').trim();
+  const jsonText = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/, '');
   try {
-    return { data: JSON.parse(text) };
+    return { data: JSON.parse(jsonText) };
   } catch {
-    return { response: json({ error: 'AI returned an unreadable answer, please retry' }, 502) };
+    const reason = out?.candidates?.[0]?.finishReason;
+    console.error('Unreadable Gemini answer', reason, text.slice(0, 300));
+    return { response: json({ error: reason === 'MAX_TOKENS' ? 'AI answer was cut off, please retry' : 'AI returned an unreadable answer, please retry' }, 502) };
   }
 }
