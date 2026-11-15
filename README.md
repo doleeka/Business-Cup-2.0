@@ -48,7 +48,7 @@ git config --global user.email "your-github-email@example.com"
 - Grocery list — ingredient aggregation, pantry quantities, approximate cost, manually entered receipt totals and download
 
 ## Honest MVP limitations
-- No user accounts or live store pricing. AI recipe generation by dish name works (Gemini free tier via a Netlify Function); video-to-recipe, screenshot extraction and receipt OCR are still demo placeholders.
+- No user accounts or live store pricing. AI features (Gemini free tier via Netlify Functions): recipe by dish name, screenshot/photo to recipe, video to recipe (YouTube link or a short uploaded video) and receipt scanning.
 - Menu data and food prices are illustrative, not verified nutritional/medical advice or live prices.
 - Allergy warnings rely on simple text matching and cannot ensure food safety.
 - Local browser storage is used, so data is per browser/device and is lost when its site data is cleared.
@@ -68,9 +68,16 @@ Search for `Nourishly` and `nourishly` in VS Code (Ctrl+Shift+F). Change visible
 ## AI recipe generator (free Gemini API)
 Recipes → **AI recipe ideas** / **AI recipe**: type a dish name, the AI drafts the recipe, you review it in the form and save.
 
+Also powered by the same key:
+- **Recipes → Screenshot**: upload a screenshot of a recipe (post, website, cookbook page) or a photo of a dish.
+- **Recipes → Video / reel**: paste a public YouTube / Shorts link, or upload a short video file (max 4 MB ≈ 15–30 s). TikTok and Instagram links can't be read directly — save the video and upload the file.
+- **Grocery list → Scan receipt with AI**: upload a receipt photo; AI reads the total and you confirm it before it is added to expenses.
+
+Files are limited to 4 MB because Netlify Functions accept at most 6 MB per request; photos are resized in the browser automatically.
+
 1. Get a free key at https://aistudio.google.com/apikey
 2. **Locally:** create a `.env` file in the project root (it is git-ignored) with `GEMINI_API_KEY=your-key`, then `npm run dev`.
 3. **Netlify:** Site configuration → Environment variables → add `GEMINI_API_KEY`, then redeploy.
 4. Optional: `GEMINI_MODEL` to switch model (default `gemini-2.5-flash`).
 
-The key stays on the server (`netlify/functions/generate-recipe.mjs`), never in the browser. The free tier has per-minute/per-day limits; when reached, the app shows "Free AI limit reached". Nutrition and cost are AI estimates.
+The key stays on the server (`netlify/functions/`, shared code in `netlify/lib/gemini.mjs`), never in the browser. The free tier has per-minute/per-day limits; when reached, the app shows "Free AI limit reached". Nutrition and cost are AI estimates.

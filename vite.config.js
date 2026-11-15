@@ -1,18 +1,20 @@
 import { defineConfig, loadEnv } from 'vite';
 import react from '@vitejs/plugin-react';
 
-// In `npm run dev`, serve /api/generate-recipe with the same code as the Netlify function,
-// so the AI generator works locally with GEMINI_API_KEY from a .env file.
+// In `npm run dev`, serve /api/* with the same code as the Netlify functions,
+// so the AI features work locally with GEMINI_API_KEY from a .env file.
 function localApi() {
   return {
     name: 'local-netlify-functions',
     configureServer(server) {
-      server.middlewares.use('/api/generate-recipe', async (req, res) => {
+      server.middlewares.use('/api', async (req, res, next) => {
+        const name = req.url.split('?')[0].replace(/^\//, '');
+        if (!['generate-recipe', 'scan-receipt'].includes(name)) return next();
         try {
-          const { default: handler } = await server.ssrLoadModule('/netlify/functions/generate-recipe.mjs');
+          const { default: handler } = await server.ssrLoadModule(`/netlify/functions/${name}.mjs`);
           const chunks = [];
           for await (const c of req) chunks.push(c);
-          const request = new Request('http://localhost/api/generate-recipe', {
+          const request = new Request(`http://localhost/api/${name}`, {
             method: req.method,
             headers: { 'content-type': 'application/json' },
             body: req.method === 'POST' ? Buffer.concat(chunks) : undefined,

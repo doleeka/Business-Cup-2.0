@@ -91,3 +91,10 @@ p{color:#79827b}
 .assignment-slot b,.assignment-slot small{display:block}
 .assignment-slot b{font-size:13px;color:#324b39}.assignment-slot small{font-size:11px;color:#8a9b8f;margin-top:4px}
 .assignment-slot>span:last-child{font-size:11px;font-weight:750}
+.media-drop{display:flex!important;flex-direction:column;align-items:center;gap:10px;border:1px dashed #cadcc9;border-radius:10px;background:#fbfcfa;padding:16px;cursor:pointer;text-align:center;color:#568564!important}
+.media-drop:hover{border-color:#6ca17b}
+.media-drop span{display:flex;align-items:center;gap:6px}
+.media-placeholder{width:56px;height:56px;border-radius:50%;background:#eef5ec;justify-content:center}
+.media-preview{max-width:100%;max-height:220px;border-radius:8px;object-fit:contain}
+.media-note{display:flex;align-items:center;gap:6px;font-size:11px;color:#7a8a7e;margin:4px 0 0}
+.media-result p{font-size:13px;color:#415948;margin:6px 0}

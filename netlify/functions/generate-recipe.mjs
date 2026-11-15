@@ -1,12 +1,14 @@
-// Serverless function: generates a recipe from a dish name using the Gemini API free tier.
-// The API key lives only on the server (Netlify env var GEMINI_API_KEY), never in the browser.
-
-const MEALS = ['Breakfast', 'Morning snack', 'Lunch', 'Afternoon snack', 'Dinner'];
-const MODEL = process.env.GEMINI_MODEL || 'gemini-2.5-flash';
+// Serverless function: builds a recipe with the Gemini API free tier from
+//  - a dish name                         { dish, category?, avoid? }
+//  - a screenshot / photo                { image: { mimeType, data } }
+//  - a YouTube link                      { youtube: "https://..." }
+//  - a short uploaded video (TikTok/Reel) { video: { mimeType, data } }
+import { MEALS, json, num, youtubeUrl, filePart, askGemini } from '../lib/gemini.mjs';
 
 const schema = {
   type: 'OBJECT',
   properties: {
+    found: { type: 'BOOLEAN', description: 'false if the media shows no food, dish or recipe' },
     name: { type: 'STRING' },
     category: { type: 'STRING', enum: MEALS },
     emoji: { type: 'STRING', description: 'One food emoji' },
@@ -26,66 +28,67 @@ const schema = {
     },
     steps: { type: 'STRING', description: 'Short cooking instructions, 2-6 sentences' },
   },
-  required: ['name', 'category', 'emoji', 'cal', 'protein', 'carbs', 'fat', 'cost', 'minutes', 'ingredients', 'steps'],
+  required: ['found', 'name', 'category', 'emoji', 'cal', 'protein', 'carbs', 'fat', 'cost', 'minutes', 'ingredients', 'steps'],
 };
 
-const json = (body, status = 200) =>
-  new Response(JSON.stringify(body), { status, headers: { 'content-type': 'application/json' } });
-
-const num = (v, max) => Math.min(max, Math.max(0, Math.round((Number(v) || 0) * 100) / 100));
+const COMMON = [
+  'All quantities, calories and macros are for ONE serving. If the source states several servings, divide accordingly.',
+  'Ingredient amounts in grams (liquids: 1 ml = 1 g); convert cups, spoons and pieces to grams.',
+  'Use common supermarket ingredient names. Cost is an estimated average US grocery price per serving.',
+  'Write the recipe in English, even if the source is in another language.',
+];
 
 export default async (req) => {
   if (req.method !== 'POST') return json({ error: 'Method not allowed' }, 405);
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) return json({ error: 'GEMINI_API_KEY is not configured on the server' }, 500);
 
   let input;
-  try { input = await req.json(); } catch { return json({ error: 'Invalid JSON' }, 400); }
-  const dish = String(input.dish || '').trim().slice(0, 120);
+  try { input = await req.json(); } catch { return json({ error: 'Invalid JSON or file too large' }, 400); }
   const category = MEALS.includes(input.category) ? input.category : '';
-  const avoid = String(input.avoid || '').trim().slice(0, 300);
-  if (!dish) return json({ error: 'Enter a dish name' }, 400);
+  const categoryLine = category ? `Meal category: ${category}.` : 'Pick the most fitting meal category.';
 
-  const prompt = [
-    `Create a realistic home-cooking recipe for: "${dish}".`,
-    category ? `Meal category: ${category}.` : 'Pick the most fitting meal category.',
-    avoid ? `Do NOT use these ingredients (family allergies/dislikes): ${avoid}.` : '',
-    'All quantities, calories and macros are for ONE serving. Ingredient amounts in grams (liquids: 1 ml = 1 g).',
-    'Use common supermarket ingredient names. Cost is an estimated average US grocery price per serving.',
-    'Write the recipe in English, even if the dish name is in another language.',
-  ].filter(Boolean).join('\n');
-
-  let res;
-  try {
-    res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${MODEL}:generateContent`, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
-      body: JSON.stringify({
-        contents: [{ role: 'user', parts: [{ text: prompt }] }],
-        generationConfig: { responseMimeType: 'application/json', responseSchema: schema, temperature: 0.7 },
-      }),
-    });
-  } catch {
-    return json({ error: 'Could not reach the AI service' }, 502);
+  let parts;
+  let source = 'dish';
+  if (input.image || input.video) {
+    const f = filePart(input.image || input.video, input.image ? ['image'] : ['video']);
+    if (f.error) return json({ error: f.error }, 400);
+    source = f.kind;
+    const task = f.kind === 'image'
+      ? 'This image is a screenshot of a recipe (social post, website, cookbook page) or a photo of a dish. Extract the recipe exactly as written; if only the dish is shown, recreate a realistic recipe for it.'
+      : 'This is a cooking video (e.g. a TikTok or Instagram Reel). Watch it, read any on-screen text and listen to the narration, and write down the recipe it shows.';
+    parts = [f.part, { text: [task, 'If there is no food or recipe at all, set found=false.', categoryLine, ...COMMON].join('\n') }];
+  } else if (input.youtube) {
+    const url = youtubeUrl(input.youtube);
+    if (!url) return json({ error: 'Paste a YouTube link (youtube.com or youtu.be)' }, 400);
+    source = 'youtube';
+    parts = [
+      { fileData: { fileUri: url } },
+      { text: ['This is a cooking video. Watch it, read on-screen text and the narration, and write down the recipe it shows.', 'If the video is not about cooking, set found=false.', categoryLine, ...COMMON].join('\n') },
+    ];
+  } else {
+    const dish = String(input.dish || '').trim().slice(0, 120);
+    const avoid = String(input.avoid || '').trim().slice(0, 300);
+    if (!dish) return json({ error: 'Enter a dish name' }, 400);
+    parts = [{
+      text: [
+        `Create a realistic home-cooking recipe for: "${dish}". Set found=true.`,
+        categoryLine,
+        avoid ? `Do NOT use these ingredients (family allergies/dislikes): ${avoid}.` : '',
+        ...COMMON,
+      ].filter(Boolean).join('\n'),
+    }];
   }
 
-  if (res.status === 429) return json({ error: 'Free AI limit reached — try again in a minute' }, 429);
-  if (!res.ok) {
-    const detail = await res.text().catch(() => '');
-    console.error('Gemini error', res.status, detail);
-    return json({ error: `AI service error (${res.status})` }, 502);
+  const { data: r, response } = await askGemini(parts, schema, { youtube: source === 'youtube' });
+  if (response) return response;
+
+  if (r.found === false) {
+    return json({ error: source === 'dish' ? 'AI could not build this recipe, try another name' : 'No recipe or dish found here — try another file or link' }, 422);
   }
-
-  const data = await res.json();
-  const text = data?.candidates?.[0]?.content?.parts?.map((p) => p.text || '').join('') || '';
-  let r;
-  try { r = JSON.parse(text); } catch { return json({ error: 'AI returned an unreadable answer, please retry' }, 502); }
-
   const ingredients = (Array.isArray(r.ingredients) ? r.ingredients : [])
     .map((i) => [String(i?.name || '').trim(), num(i?.grams, 5000)])
     .filter(([n]) => n)
     .slice(0, 30);
-  if (!r.name || !ingredients.length) return json({ error: 'AI could not build this recipe, try another name' }, 502);
+  if (!r.name || !ingredients.length) return json({ error: 'AI could not build this recipe, please retry' }, 502);
 
   return json({
     name: String(r.name).slice(0, 120),
