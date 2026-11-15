@@ -71,7 +71,7 @@ Recipes → **AI recipe ideas** / **AI recipe**: type a dish name, the AI drafts
 ## Budget planning
 On **Weekly menu** the budget banner has two buttons:
 - **Fit to budget** (instant, no AI): re-picks meals from the recipe library so the week fits the budget, skipping allergies/dislikes, preferring liked foods and keeping variety (`src/planner.js`). **Undo** restores the previous plan.
-- **AI budget week**: AI creates 14 new budget recipes for the family (budget per serving = weekly budget ÷ people ÷ 35 meals, plus allergies, dislikes, likes, health notes and optional wishes), adds them to Recipes and fills all 35 meals within the budget (`netlify/functions/plan-week.mjs`).
+- **AI budget week**: AI builds all 35 meals from the recipes already in the library, within the budget and respecting allergies, dislikes, likes, health notes and optional wishes. If its plan is still over budget, the Fit-to-budget algorithm adjusts it. Optionally it first adds 5 new budget recipes in the same style (same tags; recipes without a photo get a soft per-category backdrop) (`netlify/functions/plan-week.mjs`).
 
 Also powered by the same key:
 - **Recipes → Screenshot**: upload a screenshot of a recipe (post, website, cookbook page) or a photo of a dish.

@@ -133,3 +133,8 @@ p{color:#79827b}
 .plan-progress span{width:16px;height:16px;border:2px solid #b9d6c0;border-top-color:#397552;border-radius:50%;animation:spin 0.8s linear infinite;flex:none}
 @keyframes spin{to{transform:rotate(360deg)}}
 @media(max-width:700px){.budget-actions{margin-left:0;width:100%}.budget-actions .btn{flex:1 1 45%}}
+.check-row{display:flex!important;gap:10px;align-items:flex-start;background:#fbfcfa;border:1px solid #e2eae1;border-radius:10px;padding:11px 12px;cursor:pointer}
+.check-row input{width:auto!important;margin:2px 0 0!important;accent-color:#397552}
+.check-row b{display:block;font-size:12px;color:#26362e}
+.check-row small{display:block;font-size:11px;font-weight:500;color:#728277;margin-top:2px}
+.recipe-image>span:first-child,.detail-hero>span:first-child{filter:drop-shadow(0 6px 10px rgba(80,60,40,.18))}
