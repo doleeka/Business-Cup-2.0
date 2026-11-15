@@ -50,6 +50,13 @@ function App(){
  const applyPlan=(r,label)=>{setPrevPlan(plan);setPlan(r.plan);const week=r.cost*family.length;alert(r.missing.length?`${label}: no safe recipes for ${r.missing.join(', ')} — add some`:r.fits?`${label}: ${money(week)} / week — within your budget`:`${label}: closest plan is ${money(week)} / week, still ${money(week-weeklyLimit)} over. Try ✨ AI budget week`)};
  const fitToBudget=()=>applyPlan(fitPlanToBudget(recipes,family,weeklyLimit/family.length,plan),'Plan updated');
  const [photoBusy,setPhotoBusy]=useState(false);
+ // One-time cleanup: remove AI-created recipes that never got the library look (old "AI budget week" recipes, AI recipes without a photo).
+ // Recipes the user saved themselves are kept. Plan slots that used them are refilled from the library within the budget.
+ useEffect(()=>{try{if(localStorage.getItem('nourishly-cleanup-v1'))return;localStorage.setItem('nourishly-cleanup-v1','done')}catch{return}
+  const bad=new Set(custom.filter(r=>!r.image&&(String(r.id).startsWith('aiweek')||r.source==='ai'||(r.tags||[]).includes('AI budget week'))).map(r=>r.id));if(!bad.size)return;
+  const left=custom.filter(r=>!bad.has(r.id));setCustom(left);
+  if(Object.values(plan).some(id=>bad.has(id))){const kept=Object.fromEntries(Object.entries(plan).filter(([,id])=>!bad.has(id)));setPlan(fitPlanToBudget([...FOOD,...left],family,weeklyLimit/family.length,kept).plan)}
+  alert(`Removed ${bad.size} AI recipes without the proper look`)},[]);
  const setPhoto=(id,p)=>{const patch={image:p.url,photoCredit:{name:p.author,link:p.authorUrl}};setCustom(a=>a.map(r=>r.id===id?{...r,...patch}:r));setDetail(d=>d&&d.id===id?{...d,...patch}:d)};
  const findDetailPhoto=async()=>{setPhotoBusy(true);try{setPhoto(detail.id,await findPhoto(detail));alert('Photo added')}catch(e){alert(e.message)}setPhotoBusy(false)};
  const onAiWeek=({plan:aiPlan,created})=>{if(created.length){setCustom(a=>[...a,...created]);addPhotos(created,setPhoto)}setPlanWeek(false);applyPlan(fitPlanToBudget([...recipes,...created],family,weeklyLimit/family.length,aiPlan),created.length?`AI week ready (+${created.length} new recipes)`:'AI week ready')};
