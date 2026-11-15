@@ -84,28 +84,33 @@ export function filePart(file, kinds) {
   return { part: { inlineData: { mimeType, data } }, kind: mimeType.startsWith('video/') ? 'video' : 'image' };
 }
 
-// Models tried in order. "gemini-flash-latest" is Google's alias for the current Flash model, so the app
-// keeps working when an older model is retired (a retired model answers 404 Not Found).
+// Models tried in order. The "-latest" names are Google's aliases for the current Flash models, so the app keeps
+// working when older models are retired (gemini-2.5-flash already answers 404 for new keys).
+// Flash-Lite goes first: in tests it answered in seconds (recipes, screenshots, receipts, a whole week)
+// while Flash was often overloaded or hanging. Flash stays as the fallback.
 function modelList() {
-  const list = [process.env.GEMINI_MODEL, 'gemini-flash-latest', 'gemini-2.5-flash', 'gemini-flash-lite-latest'];
+  const list = [process.env.GEMINI_MODEL, 'gemini-flash-lite-latest', 'gemini-flash-latest'];
   return [...new Set(list.map((m) => String(m || '').trim().replace(/^models\//, '')).filter(Boolean))];
 }
 
-// mode.thinkingOff: skip "thinking" so big answers (a whole week) stay within Netlify's time limit.
-// mode.plain: no responseSchema (some models reject parts of it) — the schema is described in the prompt instead.
-async function callModel(model, key, parts, schema, mode) {
+// Netlify stops a function after 60 s; leave a margin so the user always gets a clear answer.
+const TOTAL_MS = 54000;
+const ATTEMPT_MS = 28000;
+
+// mode.plain: no responseSchema (a model may reject parts of it) — the schema is described in the prompt instead.
+async function callModel(model, key, parts, schema, mode, timeoutMs) {
   const contents = mode.plain
     ? [{ role: 'user', parts: [...parts, { text: `Answer ONLY with a JSON object that follows this JSON schema (no markdown, no comments):\n${JSON.stringify(schema)}` }] }]
     : [{ role: 'user', parts }];
   return fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
     method: 'POST',
     headers: { 'content-type': 'application/json', 'x-goog-api-key': key },
+    signal: AbortSignal.timeout(timeoutMs),
     body: JSON.stringify({
       contents,
       generationConfig: {
         responseMimeType: 'application/json',
         ...(mode.plain ? {} : { responseSchema: schema, temperature: 0.4 }),
-        ...(mode.thinkingOff ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
       },
     }),
   });
@@ -117,26 +122,29 @@ const googleMessage = (detail) => {
 };
 
 // Calls Gemini with structured JSON output. Returns { data } or { response } (an error Response to return as is).
-export async function askGemini(parts, schema, { youtube = false, fast = false } = {}) {
+export async function askGemini(parts, schema, { youtube = false } = {}) {
   const key = process.env.GEMINI_API_KEY;
   if (!key) return { response: json({ error: 'GEMINI_API_KEY is not configured on the server' }, 500) };
 
+  const started = Date.now();
+  const models = modelList();
   let status = 0;
   let detail = '';
   let out = null;
-  models: for (const model of modelList()) {
-    // Request variants for this model, from the preferred one to the most compatible one.
-    const modes = [
-      ...(fast && /flash/.test(model) ? [{ thinkingOff: true }] : []),
-      {},
-      { plain: true },
-    ];
-    for (const mode of modes) {
+  models: for (const [i, model] of models.entries()) {
+    for (const mode of [{}, { plain: true }]) {
+      const left = TOTAL_MS - (Date.now() - started);
+      if (left < 3000) break models;
+      // The last model may use all remaining time; earlier ones are cut off so a fallback still fits.
+      const timeout = i === models.length - 1 ? left : Math.min(left, ATTEMPT_MS);
       let res;
       try {
-        res = await callModel(model, key, parts, schema, mode);
-      } catch {
-        return { response: json({ error: 'Could not reach the AI service' }, 502) };
+        res = await callModel(model, key, parts, schema, mode, timeout);
+      } catch (e) {
+        status = 504; // timed out or connection dropped → try the next model
+        detail = String(e?.message || e);
+        console.error(`Gemini ${model} ${JSON.stringify(mode)} → no answer`, detail);
+        break;
       }
       status = res.status;
       if (res.ok) { out = await res.json(); break models; }
@@ -144,9 +152,8 @@ export async function askGemini(parts, schema, { youtube = false, fast = false }
       console.error(`Gemini ${model} ${JSON.stringify(mode)} → ${status}`, detail.slice(0, 500));
       if (status === 429 || status === 403 || (status === 400 && /API key/i.test(detail))) break models;
       if (status === 400 && youtube && /youtube|video|file|uri|url/i.test(detail)) break models;
-      if (status !== 400) break; // 404 retired model, 500/503 overloaded → next model; 400 → next variant
+      if (status !== 400) break; // 404 retired, 5xx overloaded → next model; 400 → simpler request first
     }
-    if (status === 500 || status === 503) await new Promise((r) => setTimeout(r, 800));
   }
 
   if (!out) {
@@ -160,7 +167,7 @@ export async function askGemini(parts, schema, { youtube = false, fast = false }
       return { response: json({ error: 'The Gemini API key has no access — create a new key in Google AI Studio' }, 502) };
     if (status === 404)
       return { response: json({ error: 'No available Gemini model found — set GEMINI_MODEL in Netlify (e.g. gemini-flash-latest)' }, 502) };
-    if (status === 500 || status === 503)
+    if (status >= 500)
       return { response: json({ error: 'Google AI is overloaded right now — please try again in a minute' }, 503) };
     return { response: json({ error: `AI service error (${status})${msg ? ': ' + msg : ''}` }, 502) };
   }

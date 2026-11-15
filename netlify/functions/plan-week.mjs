@@ -40,7 +40,7 @@ export default async (req) => {
     'Cost estimates must be realistic, not optimistic.',
   ].filter(Boolean).join('\n');
 
-  const { data, response } = await askGemini([{ text: prompt }], schema, { fast: true });
+  const { data, response } = await askGemini([{ text: prompt }], schema);
   if (response) return response;
 
   const recipes = (Array.isArray(data.recipes) ? data.recipes : []).map((r) => cleanRecipe(r)).filter(Boolean).slice(0, 20);
