@@ -48,7 +48,7 @@ git config --global user.email "your-github-email@example.com"
 - Grocery list — ingredient aggregation, pantry quantities, approximate cost, manually entered receipt totals and download
 
 ## Honest MVP limitations
-- Frontend only. No user accounts, backend, live store pricing, or real AI. Video-to-recipe, screenshot extraction, text-to-recipe and receipt OCR are demo placeholders.
+- No user accounts or live store pricing. AI recipe generation by dish name works (Gemini free tier via a Netlify Function); video-to-recipe, screenshot extraction and receipt OCR are still demo placeholders.
 - Menu data and food prices are illustrative, not verified nutritional/medical advice or live prices.
 - Allergy warnings rely on simple text matching and cannot ensure food safety.
 - Local browser storage is used, so data is per browser/device and is lost when its site data is cleared.
@@ -64,3 +64,13 @@ Search for `Nourishly` and `nourishly` in VS Code (Ctrl+Shift+F). Change visible
 3. Alternatively open **Recipes**, select a recipe, click **Add to weekly plan**, select the day, and click the matching meal slot.
 4. Calories, macros, planned meal cost and grocery ingredients recalculate and are saved in local browser storage.
 5. For a site that is already deployed, replace `src/main.jsx` and `src/style.css` from this archive in your existing project, then Commit and Push.
+
+## AI recipe generator (free Gemini API)
+Recipes → **AI recipe ideas** / **AI recipe**: type a dish name, the AI drafts the recipe, you review it in the form and save.
+
+1. Get a free key at https://aistudio.google.com/apikey
+2. **Locally:** create a `.env` file in the project root (it is git-ignored) with `GEMINI_API_KEY=your-key`, then `npm run dev`.
+3. **Netlify:** Site configuration → Environment variables → add `GEMINI_API_KEY`, then redeploy.
+4. Optional: `GEMINI_MODEL` to switch model (default `gemini-2.5-flash`).
+
+The key stays on the server (`netlify/functions/generate-recipe.mjs`), never in the browser. The free tier has per-minute/per-day limits; when reached, the app shows "Free AI limit reached". Nutrition and cost are AI estimates.
