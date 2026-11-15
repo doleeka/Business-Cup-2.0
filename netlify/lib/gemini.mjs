@@ -132,9 +132,11 @@ export async function askGemini(parts, schema, { youtube = false, fast = false }
     } catch {
       return { response: json({ error: 'Could not reach the AI service' }, 502) };
     }
-    if (res.status !== 404) break; // 404 = model retired or unknown → try the next one
+    // 404 = model retired or unknown; 500/503 = Google is overloaded right now → try the next model.
+    if (![404, 500, 503].includes(res.status)) break;
     detail = await res.text().catch(() => '');
-    console.error(`Gemini model ${model} not found, trying next`, detail.slice(0, 300));
+    console.error(`Gemini model ${model} answered ${res.status}, trying next`, detail.slice(0, 300));
+    if (res.status !== 404) await new Promise((r) => setTimeout(r, 800));
   }
 
   if (res.status === 429) return { response: json({ error: 'Free AI limit reached — try again in a minute' }, 429) };
@@ -149,6 +151,8 @@ export async function askGemini(parts, schema, { youtube = false, fast = false }
       return { response: json({ error: 'The Gemini API key has no access — create a new key in Google AI Studio' }, 502) };
     if (res.status === 404)
       return { response: json({ error: 'No available Gemini model found — set GEMINI_MODEL in Netlify (e.g. gemini-flash-latest)' }, 502) };
+    if (res.status === 500 || res.status === 503)
+      return { response: json({ error: 'Google AI is overloaded right now — please try again in a minute' }, 503) };
     return { response: json({ error: `AI service error (${res.status})` }, 502) };
   }
 
